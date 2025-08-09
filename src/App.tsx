@@ -26,12 +26,12 @@ const mobileViewportHeight = typeof window !== 'undefined'
 const MOBILE_UI_ALLOWANCE = 100; // title + instruction + buttons + paddings + watermark
 const HEIGHT = isMobile
   ? Math.max(
-      240,
-  Math.min(Math.floor(WIDTH * 1.3), Math.floor(mobileViewportHeight - MOBILE_UI_ALLOWANCE))
-    )
+    240,
+    Math.min(Math.floor(WIDTH * 1.3), Math.floor(mobileViewportHeight - MOBILE_UI_ALLOWANCE))
+  )
   : 500;
-const GROUND_HEIGHT = 40;
-const GROUND_COLOR = '#eee';
+const GROUND_HEIGHT = 25;
+const GROUND_COLOR = '#888';
 const GROUND_TOP = HEIGHT - GROUND_HEIGHT;
 
 function getRandomColor() {
@@ -166,8 +166,8 @@ function recognize(pointsRaw: [number, number][], color: string): DrawnShape {
         for (let j = i + 1; j < pts.length; j++) {
           for (let k = j + 1; k < pts.length; k++) {
             const s = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) +
-                      Math.hypot(pts[j][0] - pts[k][0], pts[j][1] - pts[k][1]) +
-                      Math.hypot(pts[k][0] - pts[i][0], pts[k][1] - pts[i][1]);
+              Math.hypot(pts[j][0] - pts[k][0], pts[j][1] - pts[k][1]) +
+              Math.hypot(pts[k][0] - pts[i][0], pts[k][1] - pts[i][1]);
             if (s > maxSum) { maxSum = s; best = [pts[i], pts[j], pts[k]]; }
           }
         }
@@ -197,13 +197,13 @@ const App: React.FC = () => {
   const runnerRef = useRef<Matter.Runner | null>(null);
   // Overlay canvas for freehand drawing preview & input
   const overlayRef = useRef<HTMLCanvasElement>(null);
-  
+
 
   const [mode, setMode] = useState<'draw' | 'play'>('draw');
   const [drawing, setDrawing] = useState(false);
   const [currentShape, setCurrentShape] = useState<DrawnShape | null>(null);
   const [shapes, setShapes] = useState<DrawnShape[]>([]);
-  
+
   const handleUndo = () => {
     if (shapes.length === 0) return;
     setShapes(prev => prev.slice(0, -1));
@@ -211,10 +211,10 @@ const App: React.FC = () => {
 
   // Initialize Matter renderer once
   useEffect(() => {
-  const container = simContainerRef.current;
-  if (!container) return;
-  // Clear any stale canvases (e.g., StrictMode mount cycles)
-  container.innerHTML = '';
+    const container = simContainerRef.current;
+    if (!container) return;
+    // Clear any stale canvases (e.g., StrictMode mount cycles)
+    container.innerHTML = '';
 
     const engine = Matter.Engine.create();
     engine.gravity.y = 0; // no gravity in draw mode
@@ -223,7 +223,7 @@ const App: React.FC = () => {
     const render = Matter.Render.create({
       element: container,
       engine,
-  options: { width: WIDTH, height: HEIGHT, wireframes: false, background: '#fff', pixelRatio: 1 },
+      options: { width: WIDTH, height: HEIGHT, wireframes: false, background: '#fff', pixelRatio: 1 },
     });
     renderRef.current = render;
 
@@ -247,8 +247,8 @@ const App: React.FC = () => {
       if (runnerRef.current && engineRef.current) {
         Matter.Runner.stop(runnerRef.current);
       }
-  // Clear container entirely
-  if (container) container.innerHTML = '';
+      // Clear container entirely
+      if (container) container.innerHTML = '';
       renderRef.current = null;
       runnerRef.current = null;
       engineRef.current = null;
@@ -261,7 +261,7 @@ const App: React.FC = () => {
     if (!engine) return;
     Matter.Composite.clear(engine.world, false, true);
     // Always show ground in both modes
-  const ground = Matter.Bodies.rectangle(
+    const ground = Matter.Bodies.rectangle(
       WIDTH / 2,
       HEIGHT - GROUND_HEIGHT / 2,
       WIDTH,
@@ -323,7 +323,7 @@ const App: React.FC = () => {
     const rect = overlayRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-  if (y >= GROUND_TOP) return; // don't start drawing over ground
+    if (y >= GROUND_TOP) return; // don't start drawing over ground
     const color = getRandomColor();
     setDrawing(true);
     setCurrentShape({ type: 'free', points: [[x, y]], color });
@@ -334,15 +334,15 @@ const App: React.FC = () => {
     const rect = overlayRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-  if (y >= GROUND_TOP) return; // ignore points over ground region
+    if (y >= GROUND_TOP) return; // ignore points over ground region
     setCurrentShape({ ...currentShape, points: [...currentShape.points, [x, y]] });
   };
 
   const handleMouseUp = () => {
     if (drawing && currentShape && currentShape.type === 'free') {
       const detected = recognize(currentShape.points, currentShape.color);
-  // add to list; world will sync in shapes effect
-  setShapes(prev => [...prev, detected]);
+      // add to list; world will sync in shapes effect
+      setShapes(prev => [...prev, detected]);
       setCurrentShape(null);
       setDrawing(false);
     }
@@ -356,7 +356,7 @@ const App: React.FC = () => {
     const rect = overlayRef.current!.getBoundingClientRect();
     const x = t.clientX - rect.left;
     const y = t.clientY - rect.top;
-  if (y >= GROUND_TOP) return;
+    if (y >= GROUND_TOP) return;
     e.preventDefault();
     const color = getRandomColor();
     setDrawing(true);
@@ -370,7 +370,7 @@ const App: React.FC = () => {
     const rect = overlayRef.current!.getBoundingClientRect();
     const x = t.clientX - rect.left;
     const y = t.clientY - rect.top;
-  if (y >= GROUND_TOP) return;
+    if (y >= GROUND_TOP) return;
     e.preventDefault();
     setCurrentShape({ ...currentShape, points: [...currentShape.points, [x, y]] });
   };
@@ -392,13 +392,13 @@ const App: React.FC = () => {
     const ctx = overlay.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, overlay.width, overlay.height);
-  if (mode === 'draw' && currentShape && currentShape.type === 'free' && currentShape.points.length > 1) {
+    if (mode === 'draw' && currentShape && currentShape.type === 'free' && currentShape.points.length > 1) {
       ctx.strokeStyle = currentShape.color;
       ctx.lineWidth = 2;
       let drawingSeg = false;
       for (let i = 0; i < currentShape.points.length; i++) {
         const [px, py] = currentShape.points[i];
-    if (py < GROUND_TOP) {
+        if (py < GROUND_TOP) {
           if (!drawingSeg) {
             ctx.beginPath();
             ctx.moveTo(px, py);
@@ -479,7 +479,7 @@ const App: React.FC = () => {
 
   return (
     <div style={{ textAlign: 'center' }}>
-  <h1>Free Draw Free Fall</h1>
+      <h1>Free Draw Free Fall</h1>
       <div>
         <div style={{ marginBottom: isMobile ? 6 : 12, fontSize: isMobile ? '0.9em' : '1.05em' }}>
           Draw any shape you like. Press <b>Fall</b> to see them drop and bounce.
@@ -507,14 +507,14 @@ const App: React.FC = () => {
           />
         )}
       </div>
-        <div style={{
-          textAlign: 'center',
-          fontSize: '0.9rem',
-          color: '#888',
-          margin: '8px 0 0 0'
-        }}>
-          Created by GPT-5 with guidance from Eric · 2025
-        </div>
+      <div style={{
+        textAlign: 'center',
+        fontSize: '0.9rem',
+        color: '#888',
+        margin: '8px 0 0 0'
+      }}>
+        Created by GPT-5 with guidance from Eric · 2025
+      </div>
     </div>
   );
 };
