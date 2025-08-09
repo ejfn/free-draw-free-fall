@@ -1,12 +1,18 @@
+:root {
+  --max-width: 1280px;
+  --padding-desktop: 2rem;
+  --padding-mobile: 12px;
+}
+
 #root {
-  max-width: 1280px;
+  max-width: var(--max-width);
   margin: 0 auto;
-  padding: 2rem;
+  padding: var(--padding-desktop);
   text-align: center;
 }
 
 @media (max-width: 600px) {
   #root {
-    padding: 12px; /* reduced to make room for the viewport */
+    padding: var(--padding-mobile); /* reduced to make room for the viewport */
   }
 }
