@@ -1,3 +1,6 @@
+# Live Demo
+
+Play here: [https://ejfn.github.io/free-draw-free-fall/](https://ejfn.github.io/free-draw-free-fall/)
 # Free Draw Free Fall
 
 An interactive physics teaching app: draw shapes freehand, auto-detects circles, rectangles, triangles, or splines, and simulates them under gravity.
@@ -39,5 +42,5 @@ http://localhost:5173/
 - Matter.js (physics)
 
 ---
-Created by Eric & Copilot, 2025.
+Created by GPT-5 with guidance from Eric · 2025.
 

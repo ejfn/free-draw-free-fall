@@ -9,10 +9,12 @@ export type DrawnShape =
   | { type: 'triangle'; points: [number, number][]; color: string }
   | { type: 'free'; points: [number, number][]; color: string };
 
-const WIDTH = 800;
-const HEIGHT = 600;
-const GROUND_HEIGHT = 20;
-const GROUND_COLOR = '#999';
+// Responsive viewport sizing
+const isMobile = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 600px)').matches;
+const WIDTH = isMobile ? Math.min(window.innerWidth, 400) : 600;
+const HEIGHT = isMobile ? Math.round(WIDTH * 0.8) : 500;
+const GROUND_HEIGHT = 40;
+const GROUND_COLOR = '#eee';
 
 function getRandomColor() {
   return `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`;
@@ -448,6 +450,14 @@ const App: React.FC = () => {
           />
         )}
       </div>
+        <div style={{
+          textAlign: 'center',
+          fontSize: '0.9rem',
+          color: '#888',
+          margin: '12px 0 0 0'
+        }}>
+          Created by GPT-5 with guidance from Eric · 2025
+        </div>
     </div>
   );
 };
