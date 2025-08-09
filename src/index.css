@@ -30,6 +30,28 @@ body {
   min-height: 100vh;
 }
 
+/* Mobile-only overrides to maximize usable width and avoid horizontal shift */
+@media (max-width: 600px) {
+  html, body {
+    width: 100%;
+    overflow-x: hidden;
+  min-height: 100dvh; /* use dynamic viewport height to reduce iOS bars issues */
+  }
+  #root {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+  padding: 8px; /* smaller padding to give height back to viewport */
+    box-sizing: border-box;
+  }
+  body {
+  display: block; /* avoid flex centering causing side offsets on small screens */
+  margin: 0;
+  }
+  canvas { display: block; }
+  h1 { font-size: 1.4em; line-height: 1.1; margin: 2px 0 2px; }
+}
+
 h1 {
   font-size: 3.2em;
   line-height: 1.1;
@@ -65,4 +87,9 @@ button:focus-visible {
   button {
     background-color: #f9f9f9;
   }
+}
+
+/* Final mobile override (placed last so it wins the cascade) */
+@media (max-width: 600px) {
+  h1 { font-size: 1.1em; line-height: 1.05; margin: 2px 0; font-weight: 600; }
 }

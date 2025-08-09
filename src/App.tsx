@@ -11,10 +11,28 @@ export type DrawnShape =
 
 // Responsive viewport sizing
 const isMobile = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 600px)').matches;
-const WIDTH = isMobile ? Math.min(window.innerWidth, 400) : 600;
-const HEIGHT = isMobile ? Math.round(WIDTH * 0.8) : 500;
+// On mobile, use nearly full device width with small side gutters to avoid overflow
+const MOBILE_GUTTER = 12; // px on each side
+const mobileViewportWidth = typeof window !== 'undefined'
+  ? Math.min(window.innerWidth || 0, document.documentElement?.clientWidth || window.innerWidth || 0)
+  : 375;
+const WIDTH = isMobile
+  ? Math.max(280, Math.floor(mobileViewportWidth - MOBILE_GUTTER * 2))
+  : 600;
+// Keep a generous height while staying within typical phone layouts
+const mobileViewportHeight = typeof window !== 'undefined'
+  ? Math.floor((('visualViewport' in window ? (window as unknown as { visualViewport?: { height?: number } }).visualViewport?.height : undefined) || window.innerHeight || document.documentElement?.clientHeight || window.innerHeight || 667))
+  : 667;
+const MOBILE_UI_ALLOWANCE = 100; // title + instruction + buttons + paddings + watermark
+const HEIGHT = isMobile
+  ? Math.max(
+      240,
+  Math.min(Math.floor(WIDTH * 1.3), Math.floor(mobileViewportHeight - MOBILE_UI_ALLOWANCE))
+    )
+  : 500;
 const GROUND_HEIGHT = 40;
 const GROUND_COLOR = '#eee';
+const GROUND_TOP = HEIGHT - GROUND_HEIGHT;
 
 function getRandomColor() {
   return `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`;
@@ -179,6 +197,7 @@ const App: React.FC = () => {
   const runnerRef = useRef<Matter.Runner | null>(null);
   // Overlay canvas for freehand drawing preview & input
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  
 
   const [mode, setMode] = useState<'draw' | 'play'>('draw');
   const [drawing, setDrawing] = useState(false);
@@ -204,7 +223,7 @@ const App: React.FC = () => {
     const render = Matter.Render.create({
       element: container,
       engine,
-      options: { width: WIDTH, height: HEIGHT, wireframes: false, background: '#fff' },
+  options: { width: WIDTH, height: HEIGHT, wireframes: false, background: '#fff', pixelRatio: 1 },
     });
     renderRef.current = render;
 
@@ -242,7 +261,7 @@ const App: React.FC = () => {
     if (!engine) return;
     Matter.Composite.clear(engine.world, false, true);
     // Always show ground in both modes
-    const ground = Matter.Bodies.rectangle(
+  const ground = Matter.Bodies.rectangle(
       WIDTH / 2,
       HEIGHT - GROUND_HEIGHT / 2,
       WIDTH,
@@ -304,8 +323,7 @@ const App: React.FC = () => {
     const rect = overlayRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const groundTop = HEIGHT - GROUND_HEIGHT;
-    if (y >= groundTop) return; // don't start drawing over ground
+  if (y >= GROUND_TOP) return; // don't start drawing over ground
     const color = getRandomColor();
     setDrawing(true);
     setCurrentShape({ type: 'free', points: [[x, y]], color });
@@ -316,8 +334,7 @@ const App: React.FC = () => {
     const rect = overlayRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const groundTop = HEIGHT - GROUND_HEIGHT;
-    if (y >= groundTop) return; // ignore points over ground region
+  if (y >= GROUND_TOP) return; // ignore points over ground region
     setCurrentShape({ ...currentShape, points: [...currentShape.points, [x, y]] });
   };
 
@@ -331,6 +348,43 @@ const App: React.FC = () => {
     }
   };
 
+  // Touch support (maps to the same logic as mouse)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (mode !== 'draw') return;
+    const t = e.touches[0];
+    if (!t) return;
+    const rect = overlayRef.current!.getBoundingClientRect();
+    const x = t.clientX - rect.left;
+    const y = t.clientY - rect.top;
+  if (y >= GROUND_TOP) return;
+    e.preventDefault();
+    const color = getRandomColor();
+    setDrawing(true);
+    setCurrentShape({ type: 'free', points: [[x, y]], color });
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!drawing || mode !== 'draw' || !currentShape || currentShape.type !== 'free') return;
+    const t = e.touches[0];
+    if (!t) return;
+    const rect = overlayRef.current!.getBoundingClientRect();
+    const x = t.clientX - rect.left;
+    const y = t.clientY - rect.top;
+  if (y >= GROUND_TOP) return;
+    e.preventDefault();
+    setCurrentShape({ ...currentShape, points: [...currentShape.points, [x, y]] });
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (drawing && currentShape && currentShape.type === 'free') {
+      e.preventDefault();
+      const detected = recognize(currentShape.points, currentShape.color);
+      setShapes(prev => [...prev, detected]);
+      setCurrentShape(null);
+      setDrawing(false);
+    }
+  };
+
   // Draw current freehand on overlay
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -338,14 +392,13 @@ const App: React.FC = () => {
     const ctx = overlay.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, overlay.width, overlay.height);
-    if (mode === 'draw' && currentShape && currentShape.type === 'free' && currentShape.points.length > 1) {
-      const groundTop = HEIGHT - GROUND_HEIGHT;
+  if (mode === 'draw' && currentShape && currentShape.type === 'free' && currentShape.points.length > 1) {
       ctx.strokeStyle = currentShape.color;
       ctx.lineWidth = 2;
       let drawingSeg = false;
       for (let i = 0; i < currentShape.points.length; i++) {
         const [px, py] = currentShape.points[i];
-        if (py < groundTop) {
+    if (py < GROUND_TOP) {
           if (!drawingSeg) {
             ctx.beginPath();
             ctx.moveTo(px, py);
@@ -428,7 +481,7 @@ const App: React.FC = () => {
     <div style={{ textAlign: 'center' }}>
   <h1>Free Draw Free Fall</h1>
       <div>
-        <div style={{ marginBottom: 12, fontSize: '1.05em' }}>
+        <div style={{ marginBottom: isMobile ? 6 : 12, fontSize: isMobile ? '0.9em' : '1.05em' }}>
           Draw any shape you like. Press <b>Fall</b> to see them drop and bounce.
         </div>
         <button onClick={() => setMode('draw')} disabled={mode === 'draw'}>Draw</button>
@@ -436,17 +489,21 @@ const App: React.FC = () => {
         <button onClick={handleUndo} disabled={shapes.length === 0}>Undo</button>
         <button onClick={handleReset}>Reset</button>
       </div>
-      <div style={{ width: WIDTH, height: HEIGHT, margin: '20px auto', position: 'relative', border: '1px solid #333', background: '#fff' }}>
+      <div style={{ width: WIDTH, height: HEIGHT, margin: '8px auto', position: 'relative', border: '1px solid #333', background: '#fff' }}>
         <div ref={simContainerRef} style={{ width: '100%', height: '100%' }} />
         {mode === 'draw' && (
           <canvas
             ref={overlayRef}
             width={WIDTH}
             height={HEIGHT}
-            style={{ position: 'absolute', inset: 0, cursor: 'crosshair' }}
+            style={{ position: 'absolute', inset: 0, cursor: 'crosshair', touchAction: 'none' }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
           />
         )}
       </div>
@@ -454,7 +511,7 @@ const App: React.FC = () => {
           textAlign: 'center',
           fontSize: '0.9rem',
           color: '#888',
-          margin: '12px 0 0 0'
+          margin: '8px 0 0 0'
         }}>
           Created by GPT-5 with guidance from Eric · 2025
         </div>
