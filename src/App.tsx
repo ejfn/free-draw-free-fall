@@ -318,6 +318,39 @@ const App: React.FC = () => {
     const runner = Matter.Runner.create();
     runnerRef.current = runner;
     Matter.Runner.run(runner, engine);
+
+    // Add event listener to detect when all bodies have stopped
+    Matter.Events.on(engine, 'afterUpdate', () => {
+      const bodies = Matter.Composite.allBodies(engine.world);
+      // Filter out static bodies (like the ground) and check if all dynamic bodies have stopped
+      const dynamicBodies = bodies.filter(body => !body.isStatic);
+
+      const onScreenBodies = dynamicBodies.filter(body =>
+        body.position.x >= -50 &&
+        body.position.x <= viewportWidth + 50 &&
+        body.position.y >= -50 &&
+        body.position.y <= viewportHeight + 50
+      );
+
+      const allOnScreenStopped = onScreenBodies.every(body => body.speed < 0.05); // Threshold for "stopped"
+
+      if (allOnScreenStopped && onScreenBodies.length > 0) {
+        // All on-screen dynamic bodies have stopped, start a timer to switch back to draw mode
+        if (!engine.currentTimer) {
+          engine.currentTimer = setTimeout(() => {
+            setMode('draw');
+            Matter.Events.off(engine, 'afterUpdate');
+            engine.currentTimer = null;
+          }, 1500); // 1.5-second delay
+        }
+      } else {
+        // Bodies are still moving on-screen or have started moving again, clear any existing timer
+        if (engine.currentTimer) {
+          clearTimeout(engine.currentTimer);
+          engine.currentTimer = null;
+        }
+      }
+    });
   };
 
   // Switch back to draw: ensure static display
