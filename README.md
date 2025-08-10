@@ -1,9 +1,8 @@
-# Live Demo
-
-Play here: [https://ejfn.github.io/free-draw-free-fall/](https://ejfn.github.io/free-draw-free-fall/)
 # Free Draw Free Fall
 
 An interactive physics teaching app: draw shapes freehand, auto-detects circles, rectangles, triangles, or splines, and simulates them under gravity.
+
+Play here: [https://ejfn.github.io/free-draw-free-fall/](https://ejfn.github.io/free-draw-free-fall/)
 
 ## Features
 
@@ -34,6 +33,15 @@ http://localhost:5173/
 2. Each shape appears instantly.
 3. Press **Fall** to start the physics simulation.
 4. Use **Undo** to remove the last shape, or **Reset** to clear all.
+
+### Controls
+- Buttons: Draw, Fall, Undo, Reset
+- Keyboard: D = Draw, F = Fall, U = Undo, R or Esc = Reset
+
+### Tips for recognition
+- Circles: draw a closed round-ish loop; hand jitter is fine.
+- Rectangles: draw roughly rectangular loops; they’ll snap to axis-aligned boxes (near-squares snap square).
+- Triangles: three-corner shapes are recognized; otherwise shapes stay freehand.
 
 ## Tech Stack
 - Vite

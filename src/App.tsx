@@ -59,6 +59,7 @@ const App: React.FC = () => {
   const renderRef = useRef<Matter.Render | null>(null);
   const runnerRef = useRef<Matter.Runner | null>(null);
   const engineTimerRef = useRef<number | null>(null);
+  const afterUpdateHandlerRef = useRef<((event: Matter.IEventTimestamped<Matter.Engine>) => void) | null>(null);
   // Overlay canvas for freehand drawing preview & input
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
@@ -68,10 +69,10 @@ const App: React.FC = () => {
   const [currentShape, setCurrentShape] = useState<DrawnShape | null>(null);
   const [shapes, setShapes] = useState<DrawnShape[]>([]);
 
-  const handleUndo = () => {
+  const handleUndo = useCallback(() => {
     if (shapes.length === 0) return;
     setShapes(prev => prev.slice(0, -1));
-  };
+  }, [shapes.length]);
 
   // Helper: clear world and add shapes (static when dynamic=false)
   const syncWorldFromShapes = useCallback((dynamic: boolean) => {
@@ -112,6 +113,11 @@ const App: React.FC = () => {
 
     return () => {
       // cleanup
+      // Remove any engine event listeners
+      if (engineRef.current && afterUpdateHandlerRef.current) {
+        Matter.Events.off(engineRef.current, 'afterUpdate', afterUpdateHandlerRef.current);
+        afterUpdateHandlerRef.current = null;
+      }
       if (renderRef.current) {
         Matter.Render.stop(renderRef.current);
         // Remove render canvas from DOM to avoid duplicates
@@ -233,7 +239,7 @@ const App: React.FC = () => {
     else if (mode === 'play') syncWorldFromShapes(true);
   }, [shapes, mode, syncWorldFromShapes]);
 
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     setShapes([]);
     setCurrentShape(null);
     setDrawing(false);
@@ -253,9 +259,9 @@ const App: React.FC = () => {
       ctx?.clearRect(0, 0, overlay.width, overlay.height);
     }
     setMode('draw');
-  };
+  }, []);
 
-  const handlePlay = () => {
+  const handlePlay = useCallback(() => {
     setMode('play');
     const engine = engineRef.current;
     if (!engine) return;
@@ -269,8 +275,13 @@ const App: React.FC = () => {
     runnerRef.current = runner;
     Matter.Runner.run(runner, engine);
 
+    // Remove any previous afterUpdate listener
+    if (afterUpdateHandlerRef.current) {
+      Matter.Events.off(engine, 'afterUpdate', afterUpdateHandlerRef.current);
+      afterUpdateHandlerRef.current = null;
+    }
     // Add event listener to detect when all bodies have stopped
-    Matter.Events.on(engine, 'afterUpdate', () => {
+    const handler = () => {
       const bodies = Matter.Composite.allBodies(engine.world);
       // Filter out static bodies (like the ground) and check if all dynamic bodies have stopped
       const dynamicBodies = bodies.filter(body => !body.isStatic);
@@ -289,7 +300,10 @@ const App: React.FC = () => {
         if (!engineTimerRef.current) {
           engineTimerRef.current = window.setTimeout(() => {
             setMode('draw');
-            Matter.Events.off(engine, 'afterUpdate');
+            if (afterUpdateHandlerRef.current) {
+              Matter.Events.off(engine, 'afterUpdate', afterUpdateHandlerRef.current);
+              afterUpdateHandlerRef.current = null;
+            }
             engineTimerRef.current = null;
           }, 1500); // 1.5-second delay
         }
@@ -300,12 +314,19 @@ const App: React.FC = () => {
           engineTimerRef.current = null;
         }
       }
-    });
-  };
+    };
+    afterUpdateHandlerRef.current = handler;
+    Matter.Events.on(engine, 'afterUpdate', handler);
+  }, [syncWorldFromShapes, viewportWidth, viewportHeight]);
 
   // Switch back to draw: ensure static display
   useEffect(() => {
     if (mode === 'draw') {
+      // Remove afterUpdate listener when leaving play mode
+      if (engineRef.current && afterUpdateHandlerRef.current) {
+        Matter.Events.off(engineRef.current, 'afterUpdate', afterUpdateHandlerRef.current);
+        afterUpdateHandlerRef.current = null;
+      }
       if (runnerRef.current && engineRef.current) {
         Matter.Runner.stop(runnerRef.current);
         runnerRef.current = null;
@@ -319,6 +340,19 @@ const App: React.FC = () => {
   useEffect(() => {
     document.title = 'Free Draw Free Fall';
   }, []);
+
+  // Keyboard shortcuts: D draw, F fall, U undo, R reset, Esc reset
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (key === 'd') setMode('draw');
+      if (key === 'f') handlePlay();
+      if (key === 'u') handleUndo();
+      if (key === 'r' || key === 'escape') handleReset();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handlePlay, handleUndo, handleReset]);
 
   return (
     <div style={{ textAlign: 'center' }}>

@@ -160,77 +160,91 @@ export function angleCoverage(points: [number, number][], cx: number, cy: number
 }
 
 export function recognize(pointsRaw: [number, number][], color: string): DrawnShape {
-  // Work on a closed path for recognition and free fill
+  // Work on a closed path to compute areas/corner counts predictably
   const rawClosed = ensureClosed(pointsRaw);
   const { w, h } = bbox(rawClosed);
-  // Slightly lower simplification than original to preserve roundness
   const eps = Math.max(3, Math.hypot(w, h) * 0.010);
   const pts = rdp(rawClosed, eps);
 
-  if (pts.length >= 3) {
-    const corners = countCorners(pts);
-    // Use simplified path for circularity metrics to reduce jitter penalty
-    const P = polygonPerimeter(pts);
-    const A = polygonArea(pts);
-    const circularity = (4 * Math.PI * A) / ((P || 1) * (P || 1));
-
-    // Circle first: combine fit quality, aspect, circularity, and low corner count
-    const circle = fitCircle(rawClosed.length >= 6 ? rawClosed : pts);
-    if (circle) {
-      const aspect = w / (h || 1);
-      const coverage = angleCoverage(pointsRaw, circle.cx, circle.cy);
-      // For circles, do NOT require endpoints to meet; rely on fit + aspect + angular coverage
-      const circleOk =
-        circle.r > 6 &&
-        circle.stdRel < 0.38 &&
-        Math.abs(aspect - 1) < 0.55 &&
-        coverage > 4.5; // ~258 degrees covered
-      if (circleOk) return { type: 'circle', x: circle.cx, y: circle.cy, r: circle.r, color };
-    }
-
-    // Rectangle: 4 corners and area close to bbox, and not too circular
-    if (corners === 4) {
-      const { minX, minY, w, h } = bbox(rawClosed);
-      const bboxArea = Math.max(1, w * h);
-      const rectangularity = A / bboxArea;
-      if (rectangularity > 0.70 && circularity < 0.82) {
-        let x = minX, y = minY, W = w, H = h;
-        const aspect = W / (H || 1);
-        // Snap near-squares to perfect squares but keep center
-        if (Math.abs(aspect - 1) < 0.15) {
-          const cx = minX + W / 2;
-          const cy = minY + H / 2;
-          const s = Math.min(W, H);
-          x = cx - s / 2;
-          y = cy - s / 2;
-          W = s; H = s;
-        }
-        return { type: 'rect', x, y, w: W, h: H, color };
-      }
-    }
-
-    // Triangle: allow rough triangles (>=3 corners) and non-circular
-    if (corners >= 3 && circularity < 0.78) {
-      // Choose three well-separated points
-      let best: [number, number][] = [];
-      let maxSum = -1;
-      for (let i = 0; i < pts.length; i++) {
-        for (let j = i + 1; j < pts.length; j++) {
-          for (let k = j + 1; k < pts.length; k++) {
-            const s = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) +
-              Math.hypot(pts[j][0] - pts[k][0], pts[j][1] - pts[k][1]) +
-              Math.hypot(pts[k][0] - pts[i][0], pts[k][1] - pts[i][1]);
-            if (s > maxSum) { maxSum = s; best = [pts[i], pts[j], pts[k]]; }
-          }
-        }
-      }
-      if (best.length === 3) return { type: 'triangle', points: best, color };
-    }
-
-    // Fallback to freehand (closed filled polygon)
-    return { type: 'free', points: pts, color };
+  if (pts.length < 3) {
+    return { type: 'free', points: rawClosed, color };
   }
 
-  // Too few points -> minimal closed polygon
-  return { type: 'free', points: rawClosed, color };
+  // Basic metrics
+  const P = polygonPerimeter(pts);
+  const A = polygonArea(pts);
+  const circularity = (4 * Math.PI * A) / ((P || 1) * (P || 1));
+  const closed = pathClosed(pointsRaw);
+  const c = countCorners(pts);
+  const areaBBox = Math.max(1, w * h);
+  const rectangularity = A / areaBBox;
+  const minSide = Math.min(w, h);
+
+  // 1) Rectangle first: use area fill vs. roundness (no corner dependency)
+  if (rectangularity >= 0.72 && circularity <= 0.84) {
+    const { minX, minY } = bbox(rawClosed);
+    let x = minX, y = minY, W = w, H = h;
+    const aspect = W / (H || 1);
+    if (Math.abs(aspect - 1) < 0.18) {
+      const cx = minX + W / 2;
+      const cy = minY + H / 2;
+      const s = Math.min(W, H);
+      x = cx - s / 2; y = cy - s / 2; W = s; H = s;
+    }
+    return { type: 'rect', x, y, w: W, h: H, color };
+  }
+
+  // 2) Circle: closed and very round; ignore corner count noise
+  if (minSide > 12 && closed && circularity >= 0.86) {
+    const fit = fitCircle(pts);
+    if (fit && fit.r > 6) return { type: 'circle', x: fit.cx, y: fit.cy, r: fit.r, color };
+    const { minX, minY } = bbox(rawClosed);
+    const cx = minX + w / 2;
+    const cy = minY + h / 2;
+    const r = Math.min(w, h) / 2;
+    if (r > 6) return { type: 'circle', x: cx, y: cy, r, color };
+  }
+
+  // 3) Rectangle (secondary): slightly looser, still roundness-capped
+  if (rectangularity >= 0.68 && circularity <= 0.88) {
+    const { minX, minY } = bbox(rawClosed);
+    let x = minX, y = minY, W = w, H = h;
+    const aspect = W / (H || 1);
+    if (Math.abs(aspect - 1) < 0.18) {
+      const cx = minX + W / 2;
+      const cy = minY + H / 2;
+      const s = Math.min(W, H);
+      x = cx - s / 2; y = cy - s / 2; W = s; H = s;
+    }
+    return { type: 'rect', x, y, w: W, h: H, color };
+  }
+
+  // 4) Triangle: 3+ corners but not very circular
+  if (c >= 3 && circularity <= 0.82) {
+    let best: [number, number][] = [];
+    let maxSum = -1;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        for (let k = j + 1; k < pts.length; k++) {
+          const s = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) +
+            Math.hypot(pts[j][0] - pts[k][0], pts[j][1] - pts[k][1]) +
+            Math.hypot(pts[k][0] - pts[i][0], pts[k][1] - pts[i][1]);
+          if (s > maxSum) { maxSum = s; best = [pts[i], pts[j], pts[k]]; }
+        }
+      }
+    }
+    if (best.length === 3) return { type: 'triangle', points: best, color };
+  }
+
+  // 5) Closed blob: still prefer a circle when fairly round (no corner requirement)
+  if (closed && minSide > 12 && circularity >= 0.80) {
+    const { minX, minY } = bbox(rawClosed);
+    const cx = minX + w / 2;
+    const cy = minY + h / 2;
+    const r = Math.min(w, h) / 2;
+    if (r > 6) return { type: 'circle', x: cx, y: cy, r, color };
+  }
+
+  // Fallback
+  return { type: 'free', points: pts, color };
 }
