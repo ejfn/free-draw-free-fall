@@ -25,6 +25,34 @@ export function pathClosed(points: [number, number][]) {
   return Math.hypot(x0 - xn, y0 - yn) < closeThresh;
 }
 
+// Always return a closed version of the path. If endpoints are not close,
+// append the starting point to explicitly close the loop.
+export function ensureClosed(points: [number, number][], minClosePx = 8): [number, number][] {
+  if (points.length < 2) return points;
+  const [x0, y0] = points[0];
+  const [xn, yn] = points[points.length - 1];
+  if (Math.hypot(x0 - xn, y0 - yn) <= minClosePx) return points;
+  return [...points, [x0, y0]];
+}
+
+export function polygonPerimeter(points: [number, number][]) {
+  let p = 0;
+  for (let i = 1; i < points.length; i++) {
+    p += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+  }
+  return p;
+}
+
+export function polygonArea(points: [number, number][]) {
+  let a = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    a += (xj * yi - xi * yj);
+  }
+  return Math.abs(a) / 2;
+}
+
 export function rdpDistance(points: [number, number][]) {
   if (points.length < 3) return 0;
   const [sx, sy] = points[0];
@@ -112,20 +140,77 @@ export function fitCircle(points: [number, number][]) {
   return { cx, cy, r, stdRel };
 }
 
-export function recognize(pointsRaw: [number, number][], color: string): DrawnShape {
-  const { w, h } = bbox(pointsRaw);
-  const eps = Math.max(4, Math.hypot(w, h) * 0.02);
-  const closed = pathClosed(pointsRaw);
-  const pts = closed ? rdp(pointsRaw, eps) : pointsRaw;
+// Measure how much of a full turn the stroke covers around a center.
+// Returns coverage in radians within [0, 2π].
+export function angleCoverage(points: [number, number][], cx: number, cy: number) {
+  if (points.length < 3) return 0;
+  const angs = points.map(([x, y]) => Math.atan2(y - cy, x - cx)).sort((a, b) => a - b);
+  const n = angs.length;
+  if (n < 2) return 0;
+  let maxGap = 0;
+  for (let i = 0; i < n - 1; i++) {
+    const gap = angs[i + 1] - angs[i];
+    if (gap > maxGap) maxGap = gap;
+  }
+  // wrap-around gap
+  const wrapGap = (angs[0] + Math.PI * 2) - angs[n - 1];
+  if (wrapGap > maxGap) maxGap = wrapGap;
+  const coverage = Math.max(0, Math.min(Math.PI * 2, Math.PI * 2 - maxGap));
+  return coverage;
+}
 
-  if (closed && pts.length >= 3) {
-    // Try polygonal shapes first
+export function recognize(pointsRaw: [number, number][], color: string): DrawnShape {
+  // Work on a closed path for recognition and free fill
+  const rawClosed = ensureClosed(pointsRaw);
+  const { w, h } = bbox(rawClosed);
+  // Slightly lower simplification than original to preserve roundness
+  const eps = Math.max(3, Math.hypot(w, h) * 0.010);
+  const pts = rdp(rawClosed, eps);
+
+  if (pts.length >= 3) {
     const corners = countCorners(pts);
-    if (corners === 4) {
-      const { minX, minY, w, h } = bbox(pointsRaw);
-      return { type: 'rect', x: minX, y: minY, w, h, color };
+    // Use simplified path for circularity metrics to reduce jitter penalty
+    const P = polygonPerimeter(pts);
+    const A = polygonArea(pts);
+    const circularity = (4 * Math.PI * A) / ((P || 1) * (P || 1));
+
+    // Circle first: combine fit quality, aspect, circularity, and low corner count
+    const circle = fitCircle(rawClosed.length >= 6 ? rawClosed : pts);
+    if (circle) {
+      const aspect = w / (h || 1);
+      const coverage = angleCoverage(pointsRaw, circle.cx, circle.cy);
+      // For circles, do NOT require endpoints to meet; rely on fit + aspect + angular coverage
+      const circleOk =
+        circle.r > 6 &&
+        circle.stdRel < 0.38 &&
+        Math.abs(aspect - 1) < 0.55 &&
+        coverage > 4.5; // ~258 degrees covered
+      if (circleOk) return { type: 'circle', x: circle.cx, y: circle.cy, r: circle.r, color };
     }
-    if (corners === 3) {
+
+    // Rectangle: 4 corners and area close to bbox, and not too circular
+    if (corners === 4) {
+      const { minX, minY, w, h } = bbox(rawClosed);
+      const bboxArea = Math.max(1, w * h);
+      const rectangularity = A / bboxArea;
+      if (rectangularity > 0.70 && circularity < 0.82) {
+        let x = minX, y = minY, W = w, H = h;
+        const aspect = W / (H || 1);
+        // Snap near-squares to perfect squares but keep center
+        if (Math.abs(aspect - 1) < 0.15) {
+          const cx = minX + W / 2;
+          const cy = minY + H / 2;
+          const s = Math.min(W, H);
+          x = cx - s / 2;
+          y = cy - s / 2;
+          W = s; H = s;
+        }
+        return { type: 'rect', x, y, w: W, h: H, color };
+      }
+    }
+
+    // Triangle: allow rough triangles (>=3 corners) and non-circular
+    if (corners >= 3 && circularity < 0.78) {
       // Choose three well-separated points
       let best: [number, number][] = [];
       let maxSum = -1;
@@ -141,17 +226,11 @@ export function recognize(pointsRaw: [number, number][], color: string): DrawnSh
       }
       if (best.length === 3) return { type: 'triangle', points: best, color };
     }
-    // Try circle fit
-    const circle = fitCircle(pointsRaw);
-    if (circle) {
-      // Looser thresholds for usability
-      const aspect = w / (h || 1);
-      const ok = circle.r > 10 && circle.stdRel < 0.2 && Math.abs(aspect - 1) < 0.3;
-      if (ok) return { type: 'circle', x: circle.cx, y: circle.cy, r: circle.r, color };
-    }
-    // Fallback to freehand (closed spline)
+
+    // Fallback to freehand (closed filled polygon)
     return { type: 'free', points: pts, color };
   }
-  // Open path -> freehand
-  return { type: 'free', points: pts, color };
+
+  // Too few points -> minimal closed polygon
+  return { type: 'free', points: rawClosed, color };
 }

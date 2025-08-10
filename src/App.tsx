@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import * as Matter from 'matter-js';
 import './App.css';
 import { type DrawnShape, recognize } from './utils/geometry';
+import { addGround, addShapeToWorld } from './physics/world';
 
 // Constants
 const MOBILE_GUTTER = 12; // px on each side
@@ -57,6 +58,7 @@ const App: React.FC = () => {
   const engineRef = useRef<Matter.Engine | null>(null);
   const renderRef = useRef<Matter.Render | null>(null);
   const runnerRef = useRef<Matter.Runner | null>(null);
+  const engineTimerRef = useRef<number | null>(null);
   // Overlay canvas for freehand drawing preview & input
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
@@ -77,60 +79,8 @@ const App: React.FC = () => {
     if (!engine) return;
     Matter.Composite.clear(engine.world, false, true);
     // Always show ground in both modes
-    const ground = Matter.Bodies.rectangle(
-      viewportWidth / 2,
-      viewportHeight - GROUND_HEIGHT / 2,
-      viewportWidth,
-      GROUND_HEIGHT,
-      { isStatic: true, restitution: 0.8, render: { fillStyle: GROUND_COLOR } }
-    );
-    Matter.World.add(engine.world, [ground]);
-    shapes.forEach(shape => {
-      if (shape.type === 'rect') {
-        const x = Math.max(0, Math.min(viewportWidth, shape.x));
-        const y = Math.max(0, Math.min(viewportHeight, shape.y));
-        const w = Math.max(10, Math.min(viewportWidth - x, Math.abs(shape.w)));
-        const h = Math.max(10, Math.min(viewportHeight - y, Math.abs(shape.h)));
-        const body = Matter.Bodies.rectangle(x + w / 2, y + h / 2, w, h, {
-          isStatic: !dynamic,
-          restitution: 0.8,
-          render: { fillStyle: shape.color },
-        });
-        Matter.World.add(engine.world, body);
-      } else if (shape.type === 'circle') {
-        const x = Math.max(0, Math.min(viewportWidth, shape.x));
-        const y = Math.max(0, Math.min(viewportHeight, shape.y));
-        const r = Math.max(5, Math.min(300, shape.r));
-        const body = Matter.Bodies.circle(x, y, r, {
-          isStatic: !dynamic,
-          restitution: 0.8,
-          render: { fillStyle: shape.color },
-        });
-        Matter.World.add(engine.world, body);
-      } else if (shape.type === 'triangle') {
-        const verts = shape.points.map(([x, y]) => ({ x, y }));
-        const cx = (verts[0].x + verts[1].x + verts[2].x) / 3;
-        const cy = (verts[0].y + verts[1].y + verts[2].y) / 3;
-        const relVerts = verts.map(v => ({ x: v.x - cx, y: v.y - cy }));
-        const body = Matter.Bodies.fromVertices(cx, cy, [relVerts], {
-          isStatic: !dynamic,
-          restitution: 0.8,
-          render: { fillStyle: shape.color },
-        }, true);
-        if (body) Matter.World.add(engine.world, body);
-      } else if (shape.type === 'free' && shape.points.length > 2) {
-        const absVerts = shape.points.map(([x, y]) => ({ x, y }));
-        const cx = absVerts.reduce((s, v) => s + v.x, 0) / absVerts.length;
-        const cy = absVerts.reduce((s, v) => s + v.y, 0) / absVerts.length;
-        const relVerts = absVerts.map(v => ({ x: v.x - cx, y: v.y - cy }));
-        const body = Matter.Bodies.fromVertices(cx, cy, [relVerts], {
-          isStatic: !dynamic,
-          restitution: 0.8,
-          render: { fillStyle: shape.color },
-        }, true);
-        if (body) Matter.World.add(engine.world, body);
-      }
-    });
+    addGround(engine, viewportWidth, viewportHeight, GROUND_HEIGHT, GROUND_COLOR);
+    shapes.forEach(shape => addShapeToWorld(engine, shape, dynamic, viewportWidth, viewportHeight));
   }, [shapes, viewportWidth, viewportHeight]);
 
   // Initialize Matter renderer once
@@ -336,18 +286,18 @@ const App: React.FC = () => {
 
       if (allOnScreenStopped && onScreenBodies.length > 0) {
         // All on-screen dynamic bodies have stopped, start a timer to switch back to draw mode
-        if (!engine.currentTimer) {
-          engine.currentTimer = setTimeout(() => {
+        if (!engineTimerRef.current) {
+          engineTimerRef.current = window.setTimeout(() => {
             setMode('draw');
             Matter.Events.off(engine, 'afterUpdate');
-            engine.currentTimer = null;
+            engineTimerRef.current = null;
           }, 1500); // 1.5-second delay
         }
       } else {
         // Bodies are still moving on-screen or have started moving again, clear any existing timer
-        if (engine.currentTimer) {
-          clearTimeout(engine.currentTimer);
-          engine.currentTimer = null;
+        if (engineTimerRef.current) {
+          window.clearTimeout(engineTimerRef.current);
+          engineTimerRef.current = null;
         }
       }
     });
