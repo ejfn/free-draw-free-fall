@@ -159,92 +159,100 @@ export function angleCoverage(points: [number, number][], cx: number, cy: number
   return coverage;
 }
 
-export function recognize(pointsRaw: [number, number][], color: string): DrawnShape {
-  // Work on a closed path to compute areas/corner counts predictably
-  const rawClosed = ensureClosed(pointsRaw);
-  const { w, h } = bbox(rawClosed);
-  const eps = Math.max(3, Math.hypot(w, h) * 0.010);
-  const pts = rdp(rawClosed, eps);
+interface ShapeCandidate {
+  shape: DrawnShape;
+  confidence: number;
+}
 
-  if (pts.length < 3) {
-    return { type: 'free', points: rawClosed, color };
-  }
-
-  // Basic metrics
-  const P = polygonPerimeter(pts);
-  const A = polygonArea(pts);
+function classifyRectangle(pts: [number, number][], rawClosed: [number, number][], P: number, A: number, w: number, h: number, color: string): ShapeCandidate {
+  const areaBBox = w * h;
+  const rectangularity = A / Math.max(1, areaBBox);
   const circularity = (4 * Math.PI * A) / ((P || 1) * (P || 1));
-  const closed = pathClosed(pointsRaw);
-  const c = countCorners(pts);
-  const areaBBox = Math.max(1, w * h);
-  const rectangularity = A / areaBBox;
-  const minSide = Math.min(w, h);
-
-  // 1) Rectangle first: use area fill vs. roundness (no corner dependency)
-  if (rectangularity >= 0.72 && circularity <= 0.84) {
-    const { minX, minY } = bbox(rawClosed);
-    let x = minX, y = minY, W = w, H = h;
-    const aspect = W / (H || 1);
-    if (Math.abs(aspect - 1) < 0.18) {
-      const cx = minX + W / 2;
-      const cy = minY + H / 2;
-      const s = Math.min(W, H);
-      x = cx - s / 2; y = cy - s / 2; W = s; H = s;
-    }
-    return { type: 'rect', x, y, w: W, h: H, color };
+  
+  let confidence = rectangularity * 0.8 + (1 - circularity) * 0.2;
+  if (rectangularity < 0.6 || circularity > 0.9) confidence = 0;
+  
+  const { minX, minY } = bbox(rawClosed);
+  let x = minX, y = minY, W = w, H = h;
+  const aspect = W / (H || 1);
+  if (Math.abs(aspect - 1) < 0.2) {
+    const cx = minX + W / 2;
+    const cy = minY + H / 2;
+    const s = Math.min(W, H);
+    x = cx - s / 2; y = cy - s / 2; W = s; H = s;
   }
+  
+  return { shape: { type: 'rect', x, y, w: W, h: H, color }, confidence };
+}
 
-  // 2) Circle: closed and very round; ignore corner count noise
-  if (minSide > 12 && closed && circularity >= 0.86) {
-    const fit = fitCircle(pts);
-    if (fit && fit.r > 6) return { type: 'circle', x: fit.cx, y: fit.cy, r: fit.r, color };
-    const { minX, minY } = bbox(rawClosed);
-    const cx = minX + w / 2;
-    const cy = minY + h / 2;
-    const r = Math.min(w, h) / 2;
-    if (r > 6) return { type: 'circle', x: cx, y: cy, r, color };
+function classifyCircle(pts: [number, number][], rawClosed: [number, number][], P: number, A: number, w: number, h: number, closed: boolean, color: string): ShapeCandidate {
+  if (!closed || Math.min(w, h) < 10) return { shape: { type: 'free', points: pts, color }, confidence: 0 };
+  
+  const circularity = (4 * Math.PI * A) / ((P || 1) * (P || 1));
+  let confidence = circularity * 0.9;
+  
+  if (circularity < 0.75) confidence = 0;
+  
+  const fit = fitCircle(pts);
+  if (fit && fit.r > 6 && fit.stdRel < 0.15) {
+    return { shape: { type: 'circle', x: fit.cx, y: fit.cy, r: fit.r, color }, confidence: confidence + 0.1 };
   }
+  
+  const { minX, minY } = bbox(rawClosed);
+  const cx = minX + w / 2;
+  const cy = minY + h / 2;
+  const r = Math.min(w, h) / 2;
+  return { shape: { type: 'circle', x: cx, y: cy, r, color }, confidence };
+}
 
-  // 3) Rectangle (secondary): slightly looser, still roundness-capped
-  if (rectangularity >= 0.68 && circularity <= 0.88) {
-    const { minX, minY } = bbox(rawClosed);
-    let x = minX, y = minY, W = w, H = h;
-    const aspect = W / (H || 1);
-    if (Math.abs(aspect - 1) < 0.18) {
-      const cx = minX + W / 2;
-      const cy = minY + H / 2;
-      const s = Math.min(W, H);
-      x = cx - s / 2; y = cy - s / 2; W = s; H = s;
-    }
-    return { type: 'rect', x, y, w: W, h: H, color };
+function classifyTriangle(pts: [number, number][], P: number, A: number, color: string): ShapeCandidate {
+  const corners = countCorners(pts);
+  const circularity = (4 * Math.PI * A) / ((P || 1) * (P || 1));
+  
+  let confidence = 0;
+  if (corners >= 3 && corners <= 5 && circularity < 0.85) {
+    confidence = Math.min(0.8, (corners - 2) * 0.2) + (1 - circularity) * 0.3;
   }
-
-  // 4) Triangle: 3+ corners but not very circular
-  if (c >= 3 && circularity <= 0.82) {
-    let best: [number, number][] = [];
-    let maxSum = -1;
-    for (let i = 0; i < pts.length; i++) {
-      for (let j = i + 1; j < pts.length; j++) {
-        for (let k = j + 1; k < pts.length; k++) {
-          const s = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) +
-            Math.hypot(pts[j][0] - pts[k][0], pts[j][1] - pts[k][1]) +
-            Math.hypot(pts[k][0] - pts[i][0], pts[k][1] - pts[i][1]);
-          if (s > maxSum) { maxSum = s; best = [pts[i], pts[j], pts[k]]; }
-        }
+  
+  if (confidence < 0.3) return { shape: { type: 'free', points: pts, color }, confidence: 0 };
+  
+  let best: [number, number][] = [];
+  let maxSum = -1;
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      for (let k = j + 1; k < pts.length; k++) {
+        const s = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) +
+          Math.hypot(pts[j][0] - pts[k][0], pts[j][1] - pts[k][1]) +
+          Math.hypot(pts[k][0] - pts[i][0], pts[k][1] - pts[i][1]);
+        if (s > maxSum) { maxSum = s; best = [pts[i], pts[j], pts[k]]; }
       }
     }
-    if (best.length === 3) return { type: 'triangle', points: best, color };
   }
+  
+  return best.length === 3 
+    ? { shape: { type: 'triangle', points: best, color }, confidence }
+    : { shape: { type: 'free', points: pts, color }, confidence: 0 };
+}
 
-  // 5) Closed blob: still prefer a circle when fairly round (no corner requirement)
-  if (closed && minSide > 12 && circularity >= 0.80) {
-    const { minX, minY } = bbox(rawClosed);
-    const cx = minX + w / 2;
-    const cy = minY + h / 2;
-    const r = Math.min(w, h) / 2;
-    if (r > 6) return { type: 'circle', x: cx, y: cy, r, color };
-  }
+export function recognize(pointsRaw: [number, number][], color: string): DrawnShape {
+  const rawClosed = ensureClosed(pointsRaw);
+  const { w, h } = bbox(rawClosed);
+  const eps = Math.max(3, Math.hypot(w, h) * 0.01);
+  const pts = rdp(rawClosed, eps);
 
-  // Fallback
-  return { type: 'free', points: pts, color };
+  if (pts.length < 3) return { type: 'free', points: rawClosed, color };
+
+  const P = polygonPerimeter(pts);
+  const A = polygonArea(pts);
+  const closed = pathClosed(pointsRaw);
+
+  const candidates = [
+    classifyRectangle(pts, rawClosed, P, A, w, h, color),
+    classifyCircle(pts, rawClosed, P, A, w, h, closed, color),
+    classifyTriangle(pts, P, A, color),
+  ].filter(c => c.confidence > 0.4);
+
+  return candidates.length > 0
+    ? candidates.sort((a, b) => b.confidence - a.confidence)[0].shape
+    : { type: 'free', points: pts, color };
 }
